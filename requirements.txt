@@ -1,0 +1,6 @@
+pyqt6           # For the GUI
+pillow          # For image handling
+pytesseract     # For OCR
+opencv-python   # For image processing
+anthropic       # Official Claude API client
+python-dotenv   # For environment variables
