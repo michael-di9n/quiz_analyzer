@@ -1,14 +1,18 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                            QPushButton, QTextEdit, QRadioButton, QButtonGroup, 
                            QLabel, QGroupBox, QFrame, QMessageBox, QInputDialog,
-                           QProgressBar)
+                           QProgressBar, QDialog)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from capture.screen_capture import ScreenCapture
 from ocr.text_extractor import TextExtractor
 from ai.claude_client import ClaudeClient
+# Import the new email functionality
+from export.email_sender import EmailSender
+from gui.email_dialog import EmailDialog
 import os
 from dotenv import load_dotenv
+import io
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -68,6 +72,16 @@ class MainWindow(QMainWindow):
                 'Claude API key not found. Please create a .env file with your ANTHROPIC_API_KEY.'
             )
             self.claude_client = None
+        
+        # Initialize Email sender
+        try:
+            self.email_sender = EmailSender()
+        except ValueError as e:
+            QMessageBox.warning(
+                self, 'Email Configuration Missing',
+                'Email configuration not found. Please create a .env file with your EMAIL_ADDRESS and EMAIL_APP_PASSWORD.'
+            )
+            self.email_sender = None
         
         # Create central widget and layout
         central_widget = QWidget()
@@ -152,6 +166,15 @@ class MainWindow(QMainWindow):
         self.response_text = QTextEdit()
         self.response_text.setReadOnly(True)
         answer_layout.addWidget(self.response_text)
+        
+        # NEW: Email button
+        email_layout = QHBoxLayout()
+        self.email_btn = QPushButton("Send Answer by Email")
+        self.email_btn.setMinimumHeight(30)
+        self.email_btn.clicked.connect(self.send_by_email)
+        email_layout.addWidget(self.email_btn)
+        email_layout.addStretch()
+        answer_layout.addLayout(email_layout)
         
         main_layout.addWidget(answer_group)
         
@@ -264,3 +287,69 @@ class MainWindow(QMainWindow):
             # Hide progress bar and re-enable send button
             self.progress_bar.setVisible(False)
             self.send_btn.setEnabled(True)
+    
+    # NEW: Email functionality
+    def send_by_email(self):
+        """Send the question and answer by email"""
+        # Check if email sender is initialized
+        if self.email_sender is None:
+            QMessageBox.critical(
+                self, "Error",
+                "Email sender is not initialized. Please check your email configuration in the .env file."
+            )
+            return
+        
+        # Check if we have content to send
+        question_text = self.question_text.toPlainText()
+        answer_text = self.response_text.toPlainText()
+        
+        if not question_text or not answer_text:
+            QMessageBox.warning(
+                self, "Warning",
+                "Missing content. Please make sure you have captured a question and received an answer."
+            )
+            return
+        
+        # Show the email dialog
+        dialog = EmailDialog(self)
+        result = dialog.exec()
+        
+        if result == QDialog.DialogCode.Accepted:
+            recipient = dialog.get_recipient()
+            subject = dialog.get_subject() or "Quiz Answer from Claude"
+            
+            # Get the screenshot image if available
+            image_data = None
+            if self.screen_capture.get_captured_pil_image():
+                # Convert the PIL image to bytes
+                img_byte_arr = io.BytesIO()
+                self.screen_capture.get_captured_pil_image().save(img_byte_arr, format='PNG')
+                image_data = img_byte_arr.getvalue()
+            
+            # Show progress in dialog
+            dialog.show_progress(True)
+            
+            # Use a timer to allow the UI to update
+            QTimer.singleShot(100, lambda: self._send_email_async(
+                recipient, question_text, answer_text, subject, image_data))
+    
+    def _send_email_async(self, recipient, question_text, answer_text, subject, image_data=None):
+        """Async helper function to send email without freezing the UI"""
+        try:
+            # Send the email
+            success, message = self.email_sender.send_quiz_answer(
+                recipient_email=recipient,
+                question_text=question_text,
+                answer_text=answer_text,
+                subject=subject,
+                image_data=image_data
+            )
+            
+            # Show result
+            if success:
+                QMessageBox.information(self, "Success", message)
+            else:
+                QMessageBox.critical(self, "Error", message)
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to send email: {str(e)}")
