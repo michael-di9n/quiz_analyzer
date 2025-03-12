@@ -1,10 +1,14 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                            QPushButton, QTextEdit, QRadioButton, QButtonGroup, 
-                           QLabel, QGroupBox, QFrame, QMessageBox, QInputDialog)
-from PyQt6.QtCore import Qt
+                           QLabel, QGroupBox, QFrame, QMessageBox, QInputDialog,
+                           QProgressBar)
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from capture.screen_capture import ScreenCapture
 from ocr.text_extractor import TextExtractor
+from ai.claude_client import ClaudeClient
+import os
+from dotenv import load_dotenv
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -13,16 +17,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Quiz Analyzer")
         self.setMinimumSize(800, 600)
         
+        # Load environment variables
+        load_dotenv()
+        
         # Initialize components
         self.screen_capture = ScreenCapture()
         
         # Initialize OCR - Ask for Tesseract path on Windows
-        tesseract_path = None
+        tesseract_path = os.getenv("TESSERACT_PATH")
         import platform
-        if platform.system() == 'Windows':
+        if platform.system() == 'Windows' and not tesseract_path:
             try:
                 # Try to find Tesseract in common locations
-                import os
                 common_paths = [
                     r'C:\Program Files\Tesseract-OCR\tesseract.exe',
                     r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe'
@@ -52,6 +58,16 @@ class MainWindow(QMainWindow):
                 )
         
         self.text_extractor = TextExtractor(tesseract_path)
+        
+        # Initialize Claude API client
+        try:
+            self.claude_client = ClaudeClient()
+        except ValueError as e:
+            QMessageBox.warning(
+                self, 'API Key Missing',
+                'Claude API key not found. Please create a .env file with your ANTHROPIC_API_KEY.'
+            )
+            self.claude_client = None
         
         # Create central widget and layout
         central_widget = QWidget()
@@ -121,6 +137,13 @@ class MainWindow(QMainWindow):
         self.send_btn.setMinimumHeight(40)
         self.send_btn.clicked.connect(self.send_to_claude)
         send_layout.addWidget(self.send_btn)
+        
+        # Add progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # Indeterminate progress
+        self.progress_bar.setVisible(False)
+        send_layout.addWidget(self.progress_bar)
+        
         send_layout.addStretch()
         answer_layout.addLayout(send_layout)
         
@@ -194,10 +217,50 @@ class MainWindow(QMainWindow):
             self.question_text.setText(f"Error processing image: {str(e)}")
     
     def send_to_claude(self):
-        """Dummy function for sending to Claude API"""
-        # Will be implemented in a later step
-        question_type = "Multiple Choice" if self.radio_mc.isChecked() else "Short Answer"
-        question = self.question_text.toPlainText()
+        """Send the extracted question to Claude API and display the response"""
+        # Check if Claude client is initialized
+        if self.claude_client is None:
+            QMessageBox.critical(
+                self, "Error",
+                "Claude API client is not initialized. Please check your API key in the .env file."
+            )
+            return
+            
+        # Get the question text
+        question_text = self.question_text.toPlainText()
         
-        self.response_text.setText(f"Dummy response from Claude for {question_type} question:\n\n" 
-                                  f"The answer is B) Paris. Paris is the capital and largest city of France.")
+        if not question_text:
+            QMessageBox.warning(self, "Warning", "No question text to send. Please capture or enter a question.")
+            return
+            
+        # Determine question type
+        question_type = "multiple_choice" if self.radio_mc.isChecked() else "short_answer"
+        
+        # Show progress bar and disable send button during API call
+        self.progress_bar.setVisible(True)
+        self.send_btn.setEnabled(False)
+        self.response_text.setText("Sending to Claude... Please wait.")
+        
+        # Use a timer to allow the UI to update
+        QTimer.singleShot(100, lambda: self._send_to_claude_async(question_text, question_type))
+    
+    def _send_to_claude_async(self, question_text, question_type):
+        """Async helper function to make the API call without freezing the UI"""
+        try:
+            # Get response from Claude
+            response = self.claude_client.ask_question(
+                question_text=question_text,
+                question_type=question_type
+            )
+            
+            # Display the response
+            self.response_text.setText(response)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to get response from Claude: {str(e)}")
+            self.response_text.setText(f"Error communicating with Claude: {str(e)}")
+            
+        finally:
+            # Hide progress bar and re-enable send button
+            self.progress_bar.setVisible(False)
+            self.send_btn.setEnabled(True)
