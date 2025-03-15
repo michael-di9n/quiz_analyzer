@@ -1,18 +1,18 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                            QPushButton, QTextEdit, QRadioButton, QButtonGroup, 
                            QLabel, QGroupBox, QFrame, QMessageBox, QInputDialog,
-                           QProgressBar, QDialog)
+                           QProgressBar, QSystemTrayIcon, QMenu, QDialog, QApplication)
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QIcon, QAction
 from capture.screen_capture import ScreenCapture
 from ocr.text_extractor import TextExtractor
 from ai.claude_client import ClaudeClient
-# Import the new email functionality
 from export.email_sender import EmailSender
 from gui.email_dialog import EmailDialog
 import os
 from dotenv import load_dotenv
 import io
+import sys
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
                 'Claude API key not found. Please create a .env file with your ANTHROPIC_API_KEY.'
             )
             self.claude_client = None
-        
+            
         # Initialize Email sender
         try:
             self.email_sender = EmailSender()
@@ -167,7 +167,7 @@ class MainWindow(QMainWindow):
         self.response_text.setReadOnly(True)
         answer_layout.addWidget(self.response_text)
         
-        # NEW: Email button
+        # Email button
         email_layout = QHBoxLayout()
         self.email_btn = QPushButton("Send Answer by Email")
         self.email_btn.setMinimumHeight(30)
@@ -182,6 +182,94 @@ class MainWindow(QMainWindow):
         main_layout.setStretchFactor(answer_group, 2)
         main_layout.setStretchFactor(question_group, 1)
         main_layout.setStretchFactor(capture_group, 1)
+        
+        # Initialize system tray
+        self.setup_system_tray()
+        
+        # Set up to prevent closing when x is clicked
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+    
+    def setup_system_tray(self):
+        """Set up the system tray icon and menu"""
+        # Create system tray icon
+        self.tray_icon = QSystemTrayIcon(self)
+        
+        # Use a standard icon - replace later with your app icon
+        self.tray_icon.setIcon(QIcon.fromTheme("application-x-executable"))
+        
+        # Create the tray menu
+        tray_menu = QMenu()
+        
+        # Add menu actions
+        show_action = QAction("Show", self)
+        show_action.triggered.connect(self.show_app)
+        
+        hide_action = QAction("Hide", self)
+        hide_action.triggered.connect(self.hide_app)
+        
+        quit_action = QAction("Quit", self)
+        quit_action.triggered.connect(self.quit_app)
+        
+        # Add actions to menu
+        tray_menu.addAction(show_action)
+        tray_menu.addAction(hide_action)
+        tray_menu.addSeparator()
+        tray_menu.addAction(quit_action)
+        
+        # Set the menu
+        self.tray_icon.setContextMenu(tray_menu)
+        
+        # Make the tray icon visible
+        self.tray_icon.show()
+        
+        # Double-click to show
+        self.tray_icon.activated.connect(self.tray_icon_activated)
+        
+        # Set tooltip
+        self.tray_icon.setToolTip("Quiz Analyzer")
+    
+    def tray_icon_activated(self, reason):
+        """Handle tray icon activation"""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show_app()
+    
+    def show_app(self):
+        """Show the application window"""
+        self.show()
+        self.activateWindow()  # Bring window to front
+    
+    def hide_app(self):
+        """Hide the application window"""
+        self.hide()
+    
+    def quit_app(self):
+        """Quit the application"""
+        # Hide the tray icon
+        self.tray_icon.hide()
+        
+        # Actually quit the application
+        QApplication.quit()
+    
+    def closeEvent(self, event):
+        """Handle window close event - hide instead of close"""
+        if self.tray_icon.isVisible():
+            # Show info message only the first time
+            if not hasattr(self, 'close_info_shown'):
+                QMessageBox.information(
+                    self,
+                    "Quiz Analyzer",
+                    "The application will continue running in the system tray. "
+                    "To show the application again, double-click the tray icon. "
+                    "To quit the application, right-click the tray icon and choose 'Quit'."
+                )
+                self.close_info_shown = True
+            
+            # Hide the window instead of closing
+            self.hide()
+            event.ignore()
+        else:
+            # If tray icon is not visible for some reason, allow normal close
+            event.accept()
     
     def capture_screen(self):
         """Capture the screen and update the UI"""
@@ -288,7 +376,6 @@ class MainWindow(QMainWindow):
             self.progress_bar.setVisible(False)
             self.send_btn.setEnabled(True)
     
-    # NEW: Email functionality
     def send_by_email(self):
         """Send the question and answer by email"""
         # Check if email sender is initialized
@@ -325,9 +412,6 @@ class MainWindow(QMainWindow):
                 img_byte_arr = io.BytesIO()
                 self.screen_capture.get_captured_pil_image().save(img_byte_arr, format='PNG')
                 image_data = img_byte_arr.getvalue()
-            
-            # Show progress in dialog
-            dialog.show_progress(True)
             
             # Use a timer to allow the UI to update
             QTimer.singleShot(100, lambda: self._send_email_async(
