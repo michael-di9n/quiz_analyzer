@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                            QLabel, QGroupBox, QFrame, QMessageBox, QInputDialog,
                            QProgressBar, QSystemTrayIcon, QMenu, QDialog, QApplication)
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPixmap, QIcon, QAction
+from PyQt6.QtGui import QPixmap, QIcon, QAction, QBrush, QPen, QFont, QPainter, QColor
 from capture.screen_capture import ScreenCapture
 from ocr.text_extractor import TextExtractor
 from ai.claude_client import ClaudeClient
@@ -194,10 +194,56 @@ class MainWindow(QMainWindow):
         # Create system tray icon
         self.tray_icon = QSystemTrayIcon(self)
         
-        # Use a standard icon - replace later with your app icon
-        self.tray_icon.setIcon(QIcon.fromTheme("application-x-executable"))
+        # Try to load the icon from the gui folder
+        try:
+            # Get the path to the icon.png file in the gui folder
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            icon_path = os.path.join(current_dir, "icon.png")
+            
+            # Check if the file exists
+            if os.path.exists(icon_path):
+                app_icon = QIcon(icon_path)
+                
+                # Verify that the icon was loaded successfully
+                if not app_icon.isNull():
+                    # Icon loaded successfully
+                    print(f"Using icon from: {icon_path}")
+                else:
+                    # Icon couldn't be loaded, use fallback
+                    raise FileNotFoundError("Icon loaded but is null")
+            else:
+                # Icon file doesn't exist, use fallback
+                raise FileNotFoundError(f"Icon not found at: {icon_path}")
+                
+        except Exception as e:
+            # Fallback: Create a simple icon programmatically
+            print(f"Using fallback icon. Error: {str(e)}")
+            
+            icon_pixmap = QPixmap(64, 64)
+            icon_pixmap.fill(Qt.GlobalColor.transparent)
+            
+            # Draw a simple "Q" icon
+            painter = QPainter(icon_pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QBrush(QColor(0, 120, 215)))  # Windows blue color
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(4, 4, 56, 56)  # Draw a circle
+            
+            # Draw "Q" letter
+            painter.setPen(QPen(Qt.GlobalColor.white, 2))
+            font = QFont("Arial", 32, QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.drawText(icon_pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "Q")
+            painter.end()
+            
+            # Create icon from pixmap
+            app_icon = QIcon(icon_pixmap)
         
-        # Create the tray menu
+        # Set the application and tray icon
+        self.tray_icon.setIcon(app_icon)
+        self.setWindowIcon(app_icon)
+
+                # Create the tray menu
         tray_menu = QMenu()
         
         # Add menu actions
@@ -224,7 +270,7 @@ class MainWindow(QMainWindow):
         
         # Double-click to show
         self.tray_icon.activated.connect(self.tray_icon_activated)
-        
+
         # Set tooltip
         self.tray_icon.setToolTip("Quiz Analyzer")
     
