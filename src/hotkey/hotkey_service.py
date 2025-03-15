@@ -123,9 +123,9 @@ class HotkeyService:
             self.main_window.send_to_claude
         )
         
-        # Schedule send_by_email to run after a longer delay
-        # This gives enough time for Claude to respond
+        # Schedule automatic email sending after Claude responds
+        # Use the modified send_by_email method with show_dialog=False
         QTimer.singleShot(
             8000,  # 8 seconds delay
-            self.main_window.send_by_email
+            lambda: self.main_window.send_by_email(False)
         )

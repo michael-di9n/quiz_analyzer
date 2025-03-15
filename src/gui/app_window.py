@@ -177,7 +177,7 @@ class MainWindow(QMainWindow):
         email_layout = QHBoxLayout()
         self.email_btn = QPushButton("Send Answer by Email")
         self.email_btn.setMinimumHeight(30)
-        self.email_btn.clicked.connect(self.send_by_email)
+        self.email_btn.clicked.connect(lambda : self.send_by_email(True))
         email_layout.addWidget(self.email_btn)
         email_layout.addStretch()
         answer_layout.addLayout(email_layout)
@@ -357,12 +357,14 @@ class MainWindow(QMainWindow):
                 
                 # Extract text from the captured image
                 self.process_captured_image()
+                print("Captured screen.")    
+
             else:
                 self.preview_label.setText("Failed to capture screen")
-                
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to capture screen: {str(e)}")
             self.preview_label.setText("Error capturing screen")
+
     
     def process_captured_image(self):
         """Extract text from the captured image using OCR"""
@@ -444,14 +446,22 @@ class MainWindow(QMainWindow):
             self.progress_bar.setVisible(False)
             self.send_btn.setEnabled(True)
     
-    def send_by_email(self):
-        """Send the question and answer by email"""
+    def send_by_email(self, show_dialog=True):
+        """
+        Send the question and answer by email
+        
+        Args:
+            show_dialog (bool): Whether to show the email dialog or send automatically
+        """
+        print("Sending by email")
         # Check if email sender is initialized
         if self.email_sender is None:
-            QMessageBox.critical(
-                self, "Error",
-                "Email sender is not initialized. Please check your email configuration in the .env file."
-            )
+            if show_dialog:
+                QMessageBox.critical(
+                    self, "Error",
+                    "Email sender is not initialized. Please check your email configuration in the .env file."
+                )
+            print("Email sender is not initialized")
             return
         
         # Check if we have content to send
@@ -459,20 +469,48 @@ class MainWindow(QMainWindow):
         answer_text = self.response_text.toPlainText()
         
         if not question_text or not answer_text:
-            QMessageBox.warning(
-                self, "Warning",
-                "Missing content. Please make sure you have captured a question and received an answer."
-            )
+            if show_dialog:
+                QMessageBox.warning(
+                    self, "Warning",
+                    "Missing content. Please make sure you have captured a question and received an answer."
+                )
+            print("Missing content for email")
             return
         
-        # Show the email dialog
-        dialog = EmailDialog(self)
-        result = dialog.exec()
-        
-        if result == QDialog.DialogCode.Accepted:
-            # Get recipients
-            recipients = dialog.get_checked_emails()
-            subject = dialog.get_subject() or "Quiz Answer from Claude"
+        if show_dialog:
+            # Show the email dialog
+            dialog = EmailDialog(self)
+            result = dialog.exec()
+            
+            if result == QDialog.DialogCode.Accepted:
+                # Get recipients
+                recipients = dialog.get_checked_emails()
+                subject = dialog.get_subject() or "Quiz Answer from Claude"
+                
+                # Get the screenshot image if available
+                image_data = None
+                if self.screen_capture.get_captured_pil_image():
+                    # Convert the PIL image to bytes
+                    img_byte_arr = io.BytesIO()
+                    self.screen_capture.get_captured_pil_image().save(img_byte_arr, format='PNG')
+                    image_data = img_byte_arr.getvalue()
+                
+                # Send to each recipient
+                for recipient in recipients:
+                    # Use a timer to allow the UI to update
+                    QTimer.singleShot(100, lambda r=recipient: self._send_email_async(
+                        r, question_text, answer_text, subject, image_data))
+        else:
+            # Automatic mode - get recipients from recipient manager
+            from gui.recipient_manager import RecipientManager
+            recipient_manager = RecipientManager()
+            recipients = recipient_manager.get_checked_recipients()
+            
+            if not recipients:
+                print("No recipients selected for automatic email")
+                return
+                
+            subject = "Quiz Answer from Claude (Auto-Sent)"
             
             # Get the screenshot image if available
             image_data = None
@@ -484,9 +522,17 @@ class MainWindow(QMainWindow):
             
             # Send to each recipient
             for recipient in recipients:
-                # Use a timer to allow the UI to update
-                QTimer.singleShot(100, lambda r=recipient: self._send_email_async(
-                    r, question_text, answer_text, subject, image_data))
+                try:
+                    # Send directly without timer
+                    self._send_email_async(
+                        recipient.email, 
+                        question_text, 
+                        answer_text, 
+                        subject, 
+                        image_data
+                    )
+                except Exception as e:
+                    print(f"Error sending automatic email: {str(e)}")
     
     def _send_email_async(self, recipient, question_text, answer_text, subject, image_data=None):
         """Async helper function to send email without freezing the UI"""
