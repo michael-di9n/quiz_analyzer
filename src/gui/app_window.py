@@ -13,6 +13,8 @@ import os
 from dotenv import load_dotenv
 import io
 import sys
+from hotkey.hotkey_service import HotkeyService
+from .hotkey_menu import HotkeySettingsDialog
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -83,6 +85,10 @@ class MainWindow(QMainWindow):
             )
             self.email_sender = None
         
+        # Initialize Hotkey Service
+        self.hotkey_service = HotkeyService(self)
+        self.hotkey_service.start()
+
         # Create central widget and layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -188,7 +194,12 @@ class MainWindow(QMainWindow):
         
         # Set up to prevent closing when x is clicked
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-    
+
+    def show_hotkey_settings(self):
+        """Show the hotkey settings dialog"""
+        dialog = HotkeySettingsDialog(self)
+        dialog.exec()
+
     def setup_system_tray(self):
         """Set up the system tray icon and menu"""
         # Create system tray icon
@@ -255,6 +266,12 @@ class MainWindow(QMainWindow):
         
         quit_action = QAction("Quit", self)
         quit_action.triggered.connect(self.quit_app)
+
+        hotkey_settings_action = QAction("Hotkey Settings", self)
+        hotkey_settings_action.triggered.connect(self.show_hotkey_settings)
+        
+        # Add action to menu (add this after hide_action and before quit_action)
+        tray_menu.addAction(hotkey_settings_action)
         
         # Add actions to menu
         tray_menu.addAction(show_action)
@@ -290,6 +307,11 @@ class MainWindow(QMainWindow):
     
     def quit_app(self):
         """Quit the application"""
+
+         # Stop the hotkey service
+        if hasattr(self, 'hotkey_service'):
+            self.hotkey_service.stop()
+            
         # Hide the tray icon
         self.tray_icon.hide()
         
