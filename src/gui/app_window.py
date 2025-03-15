@@ -402,7 +402,8 @@ class MainWindow(QMainWindow):
         result = dialog.exec()
         
         if result == QDialog.DialogCode.Accepted:
-            recipient = dialog.get_recipient()
+            # Get recipients
+            recipients = dialog.get_checked_emails()
             subject = dialog.get_subject() or "Quiz Answer from Claude"
             
             # Get the screenshot image if available
@@ -413,9 +414,11 @@ class MainWindow(QMainWindow):
                 self.screen_capture.get_captured_pil_image().save(img_byte_arr, format='PNG')
                 image_data = img_byte_arr.getvalue()
             
-            # Use a timer to allow the UI to update
-            QTimer.singleShot(100, lambda: self._send_email_async(
-                recipient, question_text, answer_text, subject, image_data))
+            # Send to each recipient
+            for recipient in recipients:
+                # Use a timer to allow the UI to update
+                QTimer.singleShot(100, lambda r=recipient: self._send_email_async(
+                    r, question_text, answer_text, subject, image_data))
     
     def _send_email_async(self, recipient, question_text, answer_text, subject, image_data=None):
         """Async helper function to send email without freezing the UI"""
