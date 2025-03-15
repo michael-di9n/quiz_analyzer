@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                            QPushButton, QTextEdit, QRadioButton, QButtonGroup, 
                            QLabel, QGroupBox, QFrame, QMessageBox, QInputDialog,
                            QProgressBar, QSystemTrayIcon, QMenu, QDialog, QApplication)
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal  # Add pyqtSignal
 from PyQt6.QtGui import QPixmap, QIcon, QAction, QBrush, QPen, QFont, QPainter, QColor
 from capture.screen_capture import ScreenCapture
 from ocr.text_extractor import TextExtractor
@@ -17,6 +17,11 @@ from hotkey.hotkey_service import HotkeyService
 from .hotkey_menu import HotkeySettingsDialog
 
 class MainWindow(QMainWindow):
+    # Add signals for action completion
+    capture_completed = pyqtSignal(bool)  # Signal with success status
+    claude_completed = pyqtSignal(bool)   # Signal with success status
+    email_completed = pyqtSignal(bool)    # Signal with success status
+    
     def __init__(self):
         super().__init__()
         
@@ -102,7 +107,7 @@ class MainWindow(QMainWindow):
         capture_btn_layout = QHBoxLayout()
         self.capture_btn = QPushButton("Capture Screen")
         self.capture_btn.setMinimumHeight(40)
-        self.capture_btn.clicked.connect(self.capture_screen)
+        self.capture_btn.clicked.connect(lambda: self.capture_screen(emit_signal=False))
         capture_btn_layout.addWidget(self.capture_btn)
         capture_btn_layout.addStretch()
         capture_layout.addLayout(capture_btn_layout)
@@ -155,7 +160,7 @@ class MainWindow(QMainWindow):
         send_layout = QHBoxLayout()
         self.send_btn = QPushButton("Send to Claude")
         self.send_btn.setMinimumHeight(40)
-        self.send_btn.clicked.connect(self.send_to_claude)
+        self.send_btn.clicked.connect(lambda: self.send_to_claude(emit_signal=False))
         send_layout.addWidget(self.send_btn)
         
         # Add progress bar
@@ -177,7 +182,7 @@ class MainWindow(QMainWindow):
         email_layout = QHBoxLayout()
         self.email_btn = QPushButton("Send Answer by Email")
         self.email_btn.setMinimumHeight(30)
-        self.email_btn.clicked.connect(lambda : self.send_by_email(True))
+        self.email_btn.clicked.connect(lambda: self.send_by_email(show_dialog=True, emit_signal=False))
         email_layout.addWidget(self.email_btn)
         email_layout.addStretch()
         answer_layout.addLayout(email_layout)
@@ -254,7 +259,7 @@ class MainWindow(QMainWindow):
         self.tray_icon.setIcon(app_icon)
         self.setWindowIcon(app_icon)
 
-                # Create the tray menu
+        # Create the tray menu
         tray_menu = QMenu()
         
         # Add menu actions
@@ -307,8 +312,7 @@ class MainWindow(QMainWindow):
     
     def quit_app(self):
         """Quit the application"""
-
-         # Stop the hotkey service
+        # Stop the hotkey service
         if hasattr(self, 'hotkey_service'):
             self.hotkey_service.stop()
             
@@ -339,8 +343,9 @@ class MainWindow(QMainWindow):
             # If tray icon is not visible for some reason, allow normal close
             event.accept()
     
-    def capture_screen(self):
+    def capture_screen(self, emit_signal=False):
         """Capture the screen and update the UI"""
+        success = False
         try:
             # Capture the entire screen
             self.screen_capture.capture_screen()
@@ -357,14 +362,18 @@ class MainWindow(QMainWindow):
                 
                 # Extract text from the captured image
                 self.process_captured_image()
-                print("Captured screen.")    
-
+                print("Captured screen.")
+                success = True
             else:
                 self.preview_label.setText("Failed to capture screen")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to capture screen: {str(e)}")
             self.preview_label.setText("Error capturing screen")
 
+        # Emit signal only if requested (for hotkey sequence)
+        if emit_signal:
+            self.capture_completed.emit(success)
+        return success
     
     def process_captured_image(self):
         """Extract text from the captured image using OCR"""
@@ -397,7 +406,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to process image: {str(e)}")
             self.question_text.setText(f"Error processing image: {str(e)}")
     
-    def send_to_claude(self):
+    def send_to_claude(self, emit_signal=False):
         """Send the extracted question to Claude API and display the response"""
         # Check if Claude client is initialized
         if self.claude_client is None:
@@ -405,14 +414,18 @@ class MainWindow(QMainWindow):
                 self, "Error",
                 "Claude API client is not initialized. Please check your API key in the .env file."
             )
-            return
+            if emit_signal:
+                self.claude_completed.emit(False)
+            return False
             
         # Get the question text
         question_text = self.question_text.toPlainText()
         
         if not question_text:
             QMessageBox.warning(self, "Warning", "No question text to send. Please capture or enter a question.")
-            return
+            if emit_signal:
+                self.claude_completed.emit(False)
+            return False
             
         # Determine question type
         question_type = "multiple_choice" if self.radio_mc.isChecked() else "short_answer"
@@ -423,10 +436,12 @@ class MainWindow(QMainWindow):
         self.response_text.setText("Sending to Claude... Please wait.")
         
         # Use a timer to allow the UI to update
-        QTimer.singleShot(100, lambda: self._send_to_claude_async(question_text, question_type))
+        QTimer.singleShot(100, lambda: self._send_to_claude_async(question_text, question_type, emit_signal))
+        return True  # Return success for starting the process
     
-    def _send_to_claude_async(self, question_text, question_type):
+    def _send_to_claude_async(self, question_text, question_type, emit_signal=False):
         """Async helper function to make the API call without freezing the UI"""
+        success = False
         try:
             # Get response from Claude
             response = self.claude_client.ask_question(
@@ -436,6 +451,7 @@ class MainWindow(QMainWindow):
             
             # Display the response
             self.response_text.setText(response)
+            success = True
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to get response from Claude: {str(e)}")
@@ -445,15 +461,24 @@ class MainWindow(QMainWindow):
             # Hide progress bar and re-enable send button
             self.progress_bar.setVisible(False)
             self.send_btn.setEnabled(True)
+            
+            # Emit signal only if requested (for hotkey sequence)
+            if emit_signal:
+                self.claude_completed.emit(success)
     
-    def send_by_email(self, show_dialog=True):
+    def send_by_email(self, show_dialog=True, emit_signal=False):
         """
         Send the question and answer by email
         
         Args:
             show_dialog (bool): Whether to show the email dialog or send automatically
+            
+        Returns:
+            bool: True if email sending process started successfully, False otherwise
         """
-        print("Sending by email")
+        print(f"Sending by email. Show dialog: {show_dialog}")
+        success = False
+        
         # Check if email sender is initialized
         if self.email_sender is None:
             if show_dialog:
@@ -462,7 +487,8 @@ class MainWindow(QMainWindow):
                     "Email sender is not initialized. Please check your email configuration in the .env file."
                 )
             print("Email sender is not initialized")
-            return
+            self.email_completed.emit(False)
+            return False
         
         # Check if we have content to send
         question_text = self.question_text.toPlainText()
@@ -475,7 +501,8 @@ class MainWindow(QMainWindow):
                     "Missing content. Please make sure you have captured a question and received an answer."
                 )
             print("Missing content for email")
-            return
+            self.email_completed.emit(False)
+            return False
         
         if show_dialog:
             # Show the email dialog
@@ -499,7 +526,10 @@ class MainWindow(QMainWindow):
                 for recipient in recipients:
                     # Use a timer to allow the UI to update
                     QTimer.singleShot(100, lambda r=recipient: self._send_email_async(
-                        r, question_text, answer_text, subject, image_data))
+                        r, question_text, answer_text, subject, image_data, show_dialog))
+                success = True
+            else:
+                success = False
         else:
             # Automatic mode - get recipients from recipient manager
             from gui.recipient_manager import RecipientManager
@@ -508,7 +538,8 @@ class MainWindow(QMainWindow):
             
             if not recipients:
                 print("No recipients selected for automatic email")
-                return
+                self.email_completed.emit(False)
+                return False
                 
             subject = "Quiz Answer from Claude (Auto-Sent)"
             
@@ -529,13 +560,24 @@ class MainWindow(QMainWindow):
                         question_text, 
                         answer_text, 
                         subject, 
-                        image_data
+                        image_data,
+                        show_dialog,
+                        emit_signal
                     )
+                    success = True
                 except Exception as e:
                     print(f"Error sending automatic email: {str(e)}")
+                    success = False
+        
+        # If no actual sending occurs, emit completion now
+        if not success:
+            self.email_completed.emit(False)
+        
+        return success
     
-    def _send_email_async(self, recipient, question_text, answer_text, subject, image_data=None):
+    def _send_email_async(self, recipient, question_text, answer_text, subject, image_data=None, show_dialog=True, emit_signal=False):
         """Async helper function to send email without freezing the UI"""
+        success = False
         try:
             # Send the email
             success, message = self.email_sender.send_quiz_answer(
@@ -546,11 +588,23 @@ class MainWindow(QMainWindow):
                 image_data=image_data
             )
             
-            # Show result
-            if success:
-                QMessageBox.information(self, "Success", message)
+            # Show result only if show_dialog is True
+            if show_dialog:
+                if success:
+                    QMessageBox.information(self, "Success", message)
+                else:
+                    QMessageBox.critical(self, "Error", message)
             else:
-                QMessageBox.critical(self, "Error", message)
+                # Just log the result in automatic mode
+                print(f"Email to {recipient}: {'Success' if success else 'Failed - ' + message}")
                 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to send email: {str(e)}")
+            if show_dialog:
+                QMessageBox.critical(self, "Error", f"Failed to send email: {str(e)}")
+            else:
+                print(f"Error sending email: {str(e)}")
+            success = False
+        
+        if emit_signal:
+            # Emit signal with success status
+            self.email_completed.emit(success)
