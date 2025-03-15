@@ -111,28 +111,21 @@ class HotkeyService:
         if not self.main_window:
             return
             
-        # Use a thread to avoid blocking the hotkey listener
-        threading.Thread(target=self._execute_action_sequence).start()
-    
-    def _execute_action_sequence(self):
-        """Execute the sequence of actions in the main window"""
-        try:
-            # 1. Capture the screen
-            self.main_window.capture_screen()
-            
-            # Wait a moment for processing
-            time.sleep(0.5)
-            
-            # 2. Send to Claude
-            self.main_window.send_to_claude()
-            
-            # Wait for Claude to respond (this is approximate)
-            # In a real implementation, we would need a callback or event
-            time.sleep(5)
-            
-            # 3. Send by email
-            self.main_window.send_by_email()
-            
-        except Exception as e:
-            # Silently fail as per requirements
-            print(f"Error in action sequence: {str(e)}")
+        # Use QTimer to schedule all actions in the main GUI thread
+        from PyQt6.QtCore import QTimer
+        
+        # Capture screen immediately, but in the main thread
+        QTimer.singleShot(0, self.main_window.capture_screen)
+        
+        # Schedule send_to_claude to run after a short delay
+        QTimer.singleShot(
+            1000,  # 1 second delay
+            self.main_window.send_to_claude
+        )
+        
+        # Schedule send_by_email to run after a longer delay
+        # This gives enough time for Claude to respond
+        QTimer.singleShot(
+            8000,  # 8 seconds delay
+            self.main_window.send_by_email
+        )
