@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QHBoxLayout, 
                            QLabel, QTextEdit, QRadioButton, QButtonGroup,
-                           QMessageBox)
+                           QMessageBox, QPushButton)  # CHANGE: Added QPushButton import
 from PyQt6.QtCore import pyqtSignal
 from ocr.text_extractor import TextExtractor
 import os
@@ -45,7 +45,16 @@ class QuestionPanel(QGroupBox):
         """Initialize the UI components"""
         question_layout = QVBoxLayout(self)
         
-        # Question text
+        # CHANGE: Added manual analysis button at the top
+        analyze_layout = QHBoxLayout()
+        self.analyze_btn = QPushButton("Analyze Captured Image")
+        self.analyze_btn.setMinimumHeight(30)
+        # We'll connect this button in the MainWindow class
+        analyze_layout.addWidget(self.analyze_btn)
+        analyze_layout.addStretch()
+        question_layout.addLayout(analyze_layout)
+        
+        # Original question text section
         question_layout.addWidget(QLabel("Extracted Question:"))
         self.question_text = QTextEdit()
         self.question_text.setReadOnly(False)  # Allow editing for manual corrections

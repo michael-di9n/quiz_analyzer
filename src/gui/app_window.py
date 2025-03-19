@@ -79,6 +79,9 @@ class MainWindow(QMainWindow):
         # Connect capture button to process captured images
         self.capture_panel.capture_completed.connect(self.on_capture_completed)
         
+        # CHANGE: Connect the new analyze button in question panel
+        self.question_panel.analyze_btn.clicked.connect(self.on_analyze_button_clicked)
+        
         # Connect hotkey manager to components
         self.hotkey_manager.connect_signals(
             self.capture_panel,
@@ -95,6 +98,33 @@ class MainWindow(QMainWindow):
             # Get the captured image and process it with OCR
             image = self.capture_panel.get_captured_image()
             self.question_panel.process_image(image)
+            
+    # CHANGE: Added new method to handle the analyze button click
+    def on_analyze_button_clicked(self):
+        """Handle manual analysis button click in question panel"""
+        # Get the captured image
+        image = self.capture_panel.get_captured_image()
+        if image is None:
+            QMessageBox.warning(
+                self, "No Image", 
+                "No image has been captured. Please capture an image first."
+            )
+            return
+            
+        # Process the image with OCR
+        success = self.question_panel.process_image(image)
+        
+        # Show appropriate message
+        if success:
+            QMessageBox.information(
+                self, "Analysis Complete", 
+                "The image has been analyzed and text has been extracted."
+            )
+        else:
+            QMessageBox.warning(
+                self, "Analysis Failed", 
+                "Failed to extract text from the image. The image may not contain readable text."
+            )
     
     def on_send_to_claude_clicked(self):
         """Handle send to Claude button click"""
